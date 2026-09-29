@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EduGenie - AI Learning Assistant</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" />
+</head>
+<body>
+  <main class="container">
+    <section class="hero">
+      <p class="eyebrow">AI-POWERED LEARNING</p>
+      <h1>EduGenie</h1>
+      <p>Google Gemini powered learning assistant for questions, explanations, quizzes, summaries and learning paths.</p>
+    </section>
+
+    <section class="card">
+      <label for="task">Choose a task</label>
+      <select id="task">
+        <option value="qa">Ask a Question</option>
+        <option value="explain">Explain a Topic</option>
+        <option value="quiz">Generate Quiz</option>
+        <option value="summarize">Summarize Text</option>
+        <option value="learn">Learning Path</option>
+      </select>
+
+      <label id="levelLabel" for="level">Learning level</label>
+      <select id="level">
+        <option>Beginner</option>
+        <option>Intermediate</option>
+        <option>Advanced</option>
+      </select>
+
+      <label id="inputLabel" for="inputText">Your question</label>
+      <textarea id="inputText" rows="10" placeholder="Example: Which is the largest ocean?"></textarea>
+
+      <button id="submitBtn" type="button">Generate</button>
+      <div id="status" class="status"></div>
+      <div id="result" class="result" aria-live="polite"></div>
+    </section>
+
+    <footer>
+      EduGenie • FastAPI + Google Gemini
+    </footer>
+  </main>
+
+<script>
+const task = document.getElementById("task");
+const input = document.getElementById("inputText");
+const label = document.getElementById("inputLabel");
+const level = document.getElementById("level");
+const levelLabel = document.getElementById("levelLabel");
+const button = document.getElementById("submitBtn");
+const statusBox = document.getElementById("status");
+const result = document.getElementById("result");
+
+const config = {
+  qa: {
+    label: "Your question",
+    placeholder: "Example: Which is the largest ocean?",
+    endpoint: "/qa"
+  },
+  explain: {
+    label: "Topic to explain",
+    placeholder: "Example: Explain photosynthesis in simple words.",
+    endpoint: "/explain"
+  },
+  quiz: {
+    label: "Passage or topic",
+    placeholder: "Paste a passage or enter a topic from which you want 3 MCQs.",
+    endpoint: "/quiz"
+  },
+  summarize: {
+    label: "Text to summarize",
+    placeholder: "Paste the educational text you want to summarize.",
+    endpoint: "/summarize"
+  },
+  learn: {
+    label: "Topic to learn",
+    placeholder: "Example: SQL",
+    endpoint: "/learn/recommendations"
+  }
+};
+
+function updateForm() {
+  const c = config[task.value];
+  label.textContent = c.label;
+  input.placeholder = c.placeholder;
+  const showLevel = task.value === "learn";
+  level.style.display = showLevel ? "block" : "none";
+  levelLabel.style.display = showLevel ? "block" : "none";
+  result.innerHTML = "";
+  statusBox.textContent = "";
+}
+
+task.addEventListener("change", updateForm);
+
+function renderMarkdownLike(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br>");
+}
+
+function renderQuiz(quiz) {
+  return quiz.map((item, index) => `
+    <article class="quiz-question">
+      <h3>Q${index + 1}. ${renderMarkdownLike(item.question)}</h3>
+      ${item.options.map((option, i) => `
+        <button class="option" data-answer="${encodeURIComponent(option)}">
+          ${String.fromCharCode(65 + i)}. ${renderMarkdownLike(option)}
+        </button>
+      `).join("")}
+      <p class="feedback"></p>
+    </article>
+  `).join("");
+}
+
+result.addEventListener("click", (event) => {
+  if (!event.target.classList.contains("option")) return;
+  const card = event.target.closest(".quiz-question");
+  const questionIndex = [...document.querySelectorAll(".quiz-question")].indexOf(card);
+  const selected = decodeURIComponent(event.target.dataset.answer);
+  const correct = window.currentQuiz[questionIndex].answer;
+  const feedback = card.querySelector(".feedback");
+
+  card.querySelectorAll(".option").forEach(btn => btn.disabled = true);
+  if (selected === correct) {
+    feedback.textContent = "Correct!";
+    feedback.className = "feedback correct";
+  } else {
+    feedback.textContent = `Not quite. Correct answer: ${correct}`;
+    feedback.className = "feedback wrong";
+  }
+});
+
+button.addEventListener("click", async () => {
+  const value = input.value.trim();
+  if (!value) {
+    statusBox.textContent = "Please enter some text first.";
+    return;
+  }
+
+  const c = config[task.value];
+  let body;
+
+  if (task.value === "qa") body = { question: value };
+  else if (task.value === "learn") body = { topic: value, level: level.value };
+  else body = { text: value };
+
+  button.disabled = true;
+  statusBox.textContent = "EduGenie is thinking...";
+  result.innerHTML = "";
+
+  try {
+    const response = await fetch(c.endpoint, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "Request failed.");
+    }
+
+    if (task.value === "quiz") {
+      if (data.quiz && data.quiz.length) {
+        window.currentQuiz = data.quiz;
+        result.innerHTML = renderQuiz(data.quiz);
+      } else {
+        result.innerHTML = `<div class="error">${renderMarkdownLike(data.error || "Quiz generation failed.")}</div>`;
+      }
+    } else {
+      result.innerHTML = `<div class="answer">${renderMarkdownLike(data.result || data.error || "No result.")}</div>`;
+    }
+    statusBox.textContent = "Done.";
+  } catch (error) {
+    statusBox.textContent = "Something went wrong.";
+    result.innerHTML = `<div class="error">${renderMarkdownLike(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+updateForm();
+</script>
+</body>
+</html>
